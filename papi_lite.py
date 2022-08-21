@@ -17,8 +17,8 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, 
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE 
 SOFTWARE."""
-__date__       = '24 November 2021'
-__version__    = '2.1.1'
+__date__       = '21 August 2022'
+__version__    = '2.2.0'
 __license__    = 'MIT'
 __author__     = 'Andrew Chung'
 __maintainer__ = 'Andrew Chung'
@@ -29,10 +29,12 @@ __all__        = [
 ]
 
 
-import platform
-import json
 import collections
+import json
 import logging
+import platform
+import re
+import ssl
 try:
   import httplib as api
 except ImportError:
@@ -45,8 +47,6 @@ except ImportError:
   from urllib.parse import urlunsplit
   from urllib.parse import urljoin
   from urllib.parse import urlencode
-import ssl
-import re
 if 'OneFS' in platform.system():
   import isi.rest
 try:
@@ -59,6 +59,7 @@ DEFAULT_API_TIMEOUT = 300
 API_PAPI = 1
 API_RAN = 2
 API_SUPPORT = 4
+TIMEOUT = 10
 URL_PAPI_SESSION = '/session/1/session'
 URL_PAPI_PLATFORM_PREFIX = '/platform/%s'
 URL_RAN_PLATFORM_PREFIX = '/namespace/%s'
@@ -110,7 +111,7 @@ class papi_lite():
     # Cleanup any existing HTTP session
     self.delete_http_session()
     headers = {'Content-type': 'application/json', 'Accept': 'application/json'}
-    conn = api.HTTPSConnection(self.server, context=self.ctx)
+    conn = api.HTTPSConnection(self.server, timeout=TIMEOUT, context=self.ctx)
     # Always ask for both platform and namespace access
     data = json.dumps({'username': self.user, 'password': self.password, 'services': ['platform', 'namespace']})
     try:
@@ -159,7 +160,7 @@ class papi_lite():
     self.session = None
     self.csrf = None
 
-  def rest_call(self, url, method=None, query_args=None, headers=None, body=None, timeout=DEFAULT_API_TIMEOUT, api_type=API_PAPI):
+  def rest_call(self, url, method=None, query_args=None, headers=None, body=None, timeout=DEFAULT_API_TIMEOUT, api_type=API_PAPI, raw=False):
     """Perform a REST call either using HTTPS or when run on an Isilon cluster,
     use the internal PAPI socket path or internal RAN socket path
 
@@ -181,7 +182,7 @@ class papi_lite():
     headers = headers or {}
     body = body or ''
     remote_url = url
-    LOG.debug('REST Call params: Method: %s / Query Args: %s / URL: %s'%(method, json.dumps(query_args), remote_url))
+    LOG.debug('REST Call params: Method: %s | URL: %s | Query Args: %s'%(method, remote_url, json.dumps(query_args)))
     if isinstance(url, basestring):
       remote_url = [str(x) for x in url.split('/') if x]
     if self.oncluster:
@@ -267,10 +268,14 @@ class papi_lite():
       if response[2]:
         json_data = json.loads(response[2])
       else:
-        json_data = ''
+        json_data = {}
     except Exception as e:
-      json_data = ''
-      response = [500, None]
+      if not raw:
+        json_data = {}
+        response = [500, None]
+      else:
+        json_data = response_list[0]
+        response = [0, None]
     if len(response_list) > 1:
       keys = json_data.keys()
       try:
